@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v2.10
+    command:
+     - "--configFile=/etc/traefik/traefik.yml"
+
+    ports:
+      - "80:80"       # HTTP
+      - "8090:8081"   # Dashboard
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: bookreview_db
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysql", "-h", "localhost", "-uroot", "-ppassword", "-e", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  book-service:
+    build:
+      context: ./book-service
+    ports:
+      - "3002:3002"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_USER: root
+      DB_PASSWORD: password
+      DB_NAME: bookreview_db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.book-service.rule=PathPrefix(`/book`)"
+      - "traefik.http.routers.book-service.middlewares=book-strip"
+      - "traefik.http.middlewares.book-strip.stripPrefix.prefixes=/book"
+      - "traefik.http.services.book-service.loadbalancer.server.port=3002"
+
+  review-service:
+    build:
+      context: ./review-service
+    ports:
+      - "3003:3003"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_USER: root
+      DB_PASSWORD: password
+      DB_NAME: bookreview_db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.review-service.rule=PathPrefix(`/review`)"
+      - "traefik.http.routers.review-service.middlewares=review-strip"
+      - "traefik.http.middlewares.review-strip.stripPrefix.prefixes=/review"
+      - "traefik.http.services.review-service.loadbalancer.server.port=3003"
+
+volumes:
+  db_data:
